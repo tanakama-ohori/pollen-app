@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>花粉高精度識別アシスタント</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800 p-4 md:p-8">
+  <script>
+    // ★ここにステップ1で取得したGitHubトークン（ghp_...）を貼り付けてください
+    const GITHUB_TOKEN = "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";
+
+    const SYSTEM_INSTRUCTION = `あなたは光学顕微鏡で観察した花粉の高精度識別アシスタントです。
+倍率は400倍、接眼ミクロメーター1目盛＝2.5µmを基準として判定します。
+
+【採集環境・基本前提】
+1. 採集地：福岡市中央区六本松1-12-1（福岡大学附属大濠中学校・高等学校 周辺）
+2. 生態環境：都市部（校内植栽、近隣の大濠公園・舞鶴公園、街路樹、家庭菜園、道端の野草）。
+3. 採集時期の考慮：指定された時期に福岡周辺で開花する植物を最優先候補として照合します。
+
+【花粉ハンドブック＆実測マスターデータベース】
+■ 秋季（9〜11月）: カナムグラ(24µm,3孔), ブタクサ(18µm,丸いトゲ), セイタカアワダチソウ(22µm,短トゲ), アメリカセンダングサ(24µm,鋭トゲ), イタドリ(25µm,縦溝), ススキ(29µm,1孔), ヒガンバナ(87×45µm,楕円網目), リンドウ(50µm,線状紋), バジル(40-66µm,6溝網目), サルスベリ(44×35µm), ムクゲ(124µm,巨大球形), コスモス(37µm)
+■ 春〜初夏（3〜6月）: シロツメクサ(26×22µm,ルーロー型), ハリエンジュ(31µm,三角), アブラナ(35×29µm,網目), コハコベ(38µm,多孔), ツユクサ(81×40µm)
+■ 非花粉: ゴミ・ホコリ・気泡（二重輪郭）
+
+【出力フォーマット】
+1. 最も可能性が高い花粉名と確信度（%）
+2. その判定に至った形態的特徴（サイズ、表面構造、萌芽孔など）
+3. 他に考えられる花粉の可能性（確信度%）と判別ポイント`;
+  </script>
+
+  <div class="max-w-2xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-100">
+    <div class="bg-gradient-to-r from-emerald-600 to-teal-700 p-6 text-white text-center">
+      <h1 class="text-2xl font-bold">🔬 花粉高精度識別アシスタント</h1>
+      <p class="text-xs text-emerald-100 mt-1">福岡市中央区六本松周辺（大濠中・高 周辺環境対応）</p>
+    </div>
+
+    <div class="p-6 space-y-6">
+      <!-- 写真アップロード -->
+      <div>
+        <label class="block text-sm font-bold text-slate-700 mb-2">📸 顕微鏡写真を選択（または撮影）</label>
+        <div class="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-xl p-4 bg-slate-50 hover:bg-slate-100 cursor-pointer transition relative">
+          <input type="file" id="imageInput" accept="image/*" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full" onchange="previewImage(event)">
+          <div id="uploadPlaceholder" class="text-center py-4">
+            <svg class="w-10 h-10 text-slate-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+            <p class="text-sm font-medium text-slate-600">ここをタップして写真を選択</p>
+            <p class="text-xs text-slate-400 mt-1">倍率400倍・目盛り入り写真がベストです</p>
+          </div>
+          <img id="imagePreview" class="hidden max-h-64 rounded-lg object-contain mt-2 shadow-sm" />
+        </div>
+      </div>
+
+      <!-- 観察条件 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">📅 採集時期（月・時期）</label>
+          <input type="text" id="seasonInput" placeholder="例: 9月中旬、10月はじめ" 
+            class="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">📍 採集場所</label>
+          <input type="text" id="locationInput" placeholder="例: 校内花壇、大濠公園、道端" 
+            class="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold text-slate-700 mb-1">🔍 倍率条件</label>
+        <input type="text" id="magInput" value="400倍（接眼ミクロメーター1目盛＝2.5µm）" readonly
+          class="w-full text-sm p-2.5 bg-slate-100 border border-slate-300 rounded-lg text-slate-600 focus:outline-none">
+      </div>
+
+      <!-- 判定ボタン -->
+      <button onclick="analyzePollen()" id="submitBtn"
+        class="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-lg transition transform active:scale-95 flex items-center justify-center space-x-2">
+        <span>✨ 花粉を同定・分析する</span>
+      </button>
+
+      <!-- ローディング -->
+      <div id="loading" class="hidden text-center py-6">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
+        <p class="text-sm font-bold text-slate-600 mt-3">花粉データベースと照合中...</p>
+      </div>
+
+      <!-- 結果表示 -->
+      <div id="resultBox" class="hidden bg-slate-50 border border-slate-200 rounded-xl p-5">
+        <h2 class="text-sm font-bold text-emerald-800 border-b border-slate-200 pb-2 mb-3">📊 識別・判定結果</h2>
+        <div id="resultContent" class="prose prose-sm max-w-none text-slate-700 leading-relaxed"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let base64Full = null;
+
+    function previewImage(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        base64Full = e.target.result;
+        document.getElementById("imagePreview").src = e.target.result;
+        document.getElementById("imagePreview").classList.remove("hidden");
+        document.getElementById("uploadPlaceholder").classList.add("hidden");
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function analyzePollen() {
+      if (!base64Full) {
+        alert("顕微鏡写真をアップロードしてください。");
+        return;
+      }
+      const season = document.getElementById("seasonInput").value || "未指定";
+      const location = document.getElementById("locationInput").value || "福岡市中央区六本松周辺";
+      const mag = document.getElementById("magInput").value;
+
+      const userPrompt = `【観察データ】\n- 採集時期: ${season}\n- 採集場所: ${location}\n- 観察倍率: ${mag}\n添付した顕微鏡写真の花粉を同定してください。`;
+
+      document.getElementById("loading").classList.remove("hidden");
+      document.getElementById("resultBox").classList.add("hidden");
+      document.getElementById("submitBtn").disabled = true;
+
+      try {
+        const response = await fetch("https://models.inference.ai.azure.com/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${GITHUB_TOKEN}`
+          },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: SYSTEM_INSTRUCTION },
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: userPrompt },
+                  { type: "image_url", image_url: { url: base64Full } }
+                ]
+              }
+            ]
+          })
+        });
+
+        const data = await response.json();
+        if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+
+        const markdownText = data.choices[0].message.content;
+        document.getElementById("resultContent").innerHTML = marked.parse(markdownText);
+        document.getElementById("resultBox").classList.remove("hidden");
+      } catch (err) {
+        alert("エラー: " + err.message);
+      } finally {
+        document.getElementById("loading").classList.add("hidden");
+        document.getElementById("submitBtn").disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
